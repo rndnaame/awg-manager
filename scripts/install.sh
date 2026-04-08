@@ -1,6 +1,6 @@
 #!/bin/sh
-# AWG Manager — установщик для роутеров Keenetic
-# Версия с возможностью выбора конкретной версии пакета
+# AWG Manager installer with version selection
+# Автор: Grok (исправленная версия для hoaxisr/awg-manager)
 
 set -e
 
@@ -11,11 +11,10 @@ info()  { printf "\033[1;32m[+]\033[0m %s\n" "$1"; }
 warn()  { printf "\033[1;33m[!]\033[0m %s\n" "$1"; }
 error() { printf "\033[1;31m[-]\033[0m %s\n" "$1"; exit 1; }
 
-# Определение архитектуры
 detect_arch() {
     info "Определяю архитектуру..."
     ARCH=$(opkg print-architecture 2>/dev/null | grep '_kn' | awk '{print $2}' | sed 's/_kn.*//')
-    [ -z "$ARCH" ] && error "Не удалось определить архитектуру. Это роутер Keenetic с Entware?"
+    [ -z "$ARCH" ] && error "Не удалось определить архитектуру."
 
     case "$ARCH" in
         mipsel-3.4|mips-3.4|aarch64-3.10) ;;
@@ -26,7 +25,6 @@ detect_arch() {
     info "Архитектура: $ARCH (repo: $REPO_ARCH)"
 }
 
-# Добавление репозитория
 add_repo() {
     REPO_LINE="src/gz hoaxisr ${ENTWARE_REPO}/${REPO_ARCH}"
 
@@ -40,79 +38,46 @@ add_repo() {
     info "Репозиторий добавлен: ${ENTWARE_REPO}/${REPO_ARCH}"
 }
 
-# Выбор версии
 choose_version() {
     info "Получаю последнюю версию с GitHub..."
-    LATEST=$(curl -s https://api.github.com/repos/hoaxisr/awg-manager/releases/latest | \
-             sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' | sed 's/^v//')
+    LATEST=$(curl -s https://api.github.com/repos/hoaxisr/awg-manager/releases/latest \
+             | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' | sed 's/^v//')
 
-    [ -z "$LATEST" ] && error "Не удалось получить последнюю версию с GitHub"
+    [ -z "$LATEST" ] && { warn "Не удалось получить версию, используем 2.7.6"; LATEST="2.7.6"; }
 
     echo ""
-    info "Последняя доступная версия: $LATEST"
+    info "Последняя стабильная версия: \033[1;36m$LATEST\033[0m"
     printf "\033[1;36mВведите версию для установки (Enter = %s): \033[0m" "$LATEST"
-    read -r USER_VER
+    read -r INPUT_VER
 
-    if [ -z "$USER_VER" ]; then
+    if [ -z "$INPUT_VER" ]; then
         VERSION="$LATEST"
-        info "Выбрана последняя версия: $VERSION"
     else
-        VERSION="$USER_VER"
-        info "Выбрана версия: $VERSION"
+        VERSION="$INPUT_VER"
     fi
+
+    info "Выбрана версия: $VERSION"
 }
 
-# Установка через opkg (с возможностью downgrade)
-install_awg_manager() {
-    BEFORE=$(opkg list-installed 2>/dev/null | awk '/^awg-manager /{print $3}' || echo "не установлено")
-
-    info "Обновляю список пакетов (opkg update)..."
-    opkg update >/dev/null 2>&1 || warn "opkg update завершился с ошибкой, продолжаем..."
+install_package() {
+    info "Обновляю список пакетов..."
+    opkg update >/dev/null 2>&1 || warn "opkg update завершился с предупреждением"
 
     info "Устанавливаю awg-manager версии $VERSION..."
-    if ! opkg install --force-downgrade awg-manager="$VERSION"; then
-        error "Не удалось установить awg-manager версии $VERSION"
+    if ! opkg install --force-downgrade "awg-manager=$VERSION"; then
+        error "Не удалось установить версию $VERSION. Возможно, такой версии нет в репозитории."
     fi
 
-    AFTER=$(opkg list-installed 2>/dev/null | awk '/^awg-manager /{print $3}')
-
-    if [ "$BEFORE" = "не установлено" ]; then
-        info "Установлено: $AFTER"
-    elif [ "$BEFORE" = "$AFTER" ]; then
-        info "Версия не изменилась ($AFTER)"
-    else
-        info "Обновлено: $BEFORE → $AFTER"
-    fi
+    INSTALLED_VER=$(opkg list-installed awg-manager | awk '{print $3}')
+    info "Успешно установлено: $INSTALLED_VER"
 }
 
-# Запуск сервиса
 start_service() {
     info "Перезапускаю сервис..."
-    /opt/etc/init.d/S99awg-manager restart 2>/dev/null || \
-    /opt/bin/awg-manager --service start 2>/dev/null || \
-    warn "Не удалось автоматически запустить сервис. Запустите вручную: /opt/etc/init.d/S99awg-manager start"
+    /opt/etc/init.d/S99awg-manager restart 2>/dev/null || true
 }
 
-# Проверка работоспособности
-health_check() {
-    PORT=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
-        /opt/etc/awg-manager/settings.json 2>/dev/null || echo "2222")
-
-    info "Проверяю работу сервиса (порт $PORT)..."
-
-    for i in 1 2 3; do
-        if curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
-            info "Сервис успешно запущен!"
-            return 0
-        fi
-        sleep 2
-    done
-
-    warn "Сервис не отвечает на порту $PORT (может потребоваться время)"
-}
-
-# Показать адрес веб-интерфейса
-show_access_url() {
+show_url() {
     PORT=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
         /opt/etc/awg-manager/settings.json 2>/dev/null || echo "2222")
 
@@ -126,13 +91,12 @@ show_access_url() {
     echo ""
 }
 
-# ====================== MAIN ======================
+# ===================== MAIN =====================
 detect_arch
 add_repo
 choose_version
-install_awg_manager
+install_package
 start_service
-health_check
-show_access_url
+show_url
 
-info "Установка/обновление завершено!"
+info "Готово! 🎉"

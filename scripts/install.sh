@@ -31,7 +31,7 @@ add_repo() {
     info "Репозиторий добавлен"
 }
 
-# Выбор версии — ИСПРАВЛЕННЫЙ БЛОК
+# Выбор версии — исправленный надёжный вариант для BusyBox
 choose_version() {
     info "Получаю последнюю версию с GitHub..."
     LATEST=$(curl -s https://api.github.com/repos/hoaxisr/awg-manager/releases/latest | \
@@ -41,9 +41,10 @@ choose_version() {
 
     echo ""
     info "Последняя доступная версия: \033[1;36m$LATEST\033[0m"
-    
-    # Правильный ввод для BusyBox
+
+    # Критически важная строка — отдельный printf + echo для BusyBox
     printf "\033[1;36mВведите версию для установки (Enter = %s): \033[0m" "$LATEST"
+    echo ""   # <-- это решает проблему с read
     read -r VERSION
 
     if [ -z "$VERSION" ]; then

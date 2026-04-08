@@ -1,5 +1,6 @@
 #!/bin/sh
 # AWG Manager — установщик с выбором версии (для rndnaame/awg-manager)
+# Специально исправлено для BusyBox ash
 
 set -e
 
@@ -7,7 +8,6 @@ info()  { printf "\033[1;32m[+]\033[0m %s\n" "$1"; }
 warn()  { printf "\033[1;33m[!]\033[0m %s\n" "$1"; }
 error() { printf "\033[1;31m[-]\033[0m %s\n" "$1"; exit 1; }
 
-# Определение архитектуры
 detect_arch() {
     info "Определяю архитектуру..."
     ARCH=$(opkg print-architecture 2>/dev/null | grep '_kn' | awk '{print $2}' | sed 's/_kn.*//')
@@ -17,7 +17,6 @@ detect_arch() {
     info "Архитектура: $ARCH (repo: $REPO_ARCH)"
 }
 
-# Добавление репозитория
 add_repo() {
     REPO_LINE="src/gz hoaxisr http://repo.hoaxisr.ru/$REPO_ARCH"
 
@@ -31,7 +30,7 @@ add_repo() {
     info "Репозиторий добавлен"
 }
 
-# Выбор версии — исправленный надёжный вариант для BusyBox
+# === Самый надёжный ввод версии для BusyBox ===
 choose_version() {
     info "Получаю последнюю версию с GitHub..."
     LATEST=$(curl -s https://api.github.com/repos/hoaxisr/awg-manager/releases/latest | \
@@ -42,10 +41,9 @@ choose_version() {
     echo ""
     info "Последняя доступная версия: \033[1;36m$LATEST\033[0m"
 
-    # Критически важная строка — отдельный printf + echo для BusyBox
     printf "\033[1;36mВведите версию для установки (Enter = %s): \033[0m" "$LATEST"
-    echo ""   # <-- это решает проблему с read
-    read -r VERSION
+    # Читаем строго с терминала — это решает проблему в ash
+    read -r VERSION </dev/tty
 
     if [ -z "$VERSION" ]; then
         VERSION="$LATEST"
@@ -55,14 +53,13 @@ choose_version() {
     fi
 }
 
-# Установка пакета
 install_package() {
     info "Обновляю список пакетов..."
     opkg update >/dev/null 2>&1 || warn "opkg update завершился с предупреждением"
 
     info "Устанавливаю awg-manager версии $VERSION..."
     if ! opkg install --force-downgrade "awg-manager=$VERSION"; then
-        error "Не удалось установить версию $VERSION. Убедитесь, что такая версия существует в репозитории."
+        error "Не удалось установить версию $VERSION. Убедитесь, что такая версия существует."
     fi
 
     INSTALLED=$(opkg list-installed awg-manager | awk '{print $3}')
